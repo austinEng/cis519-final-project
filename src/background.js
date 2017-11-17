@@ -11,77 +11,102 @@ initializeDB().then(db => {
     },
   });
 
-  const transaction = db.transaction(['historyStore', 'navigationStore'], 'readonly');
-  const historyStore = transaction.objectStore('historyStore');
-  const navigationStore = transaction.objectStore('navigationStore');
+  window.exportData = function() {
+    const historyItems = [];
+    const navigationItems = [];
 
-  const { processHistoryItem, processNavigationItem } = (() => {
-    var currentHistoryCursor = undefined;
-    var currentNavigationCursor = undefined;
+    const transaction = db.transaction(['historyStore', 'navigationStore'], 'readonly');
+    const historyStore = transaction.objectStore('historyStore');
+    const navigationStore = transaction.objectStore('navigationStore');
 
-    function handleNavigation() {
-      const item = currentNavigationCursor.value;
-      console.log('Navigation:', item.time, item);
-      const temp = currentNavigationCursor;
-      currentNavigationCursor = undefined;
-      temp.continue();
-    }
+    const { processHistoryItem, processNavigationItem } = (() => {
+      var currentHistoryCursor = undefined;
+      var currentNavigationCursor = undefined;
 
-    function handleHistory() {
-      const item = currentHistoryCursor.value;
-      console.log('Interaction:', item.time, item);
-      const temp = currentHistoryCursor;
-      currentHistoryCursor = undefined;
-      temp.continue();
-    }
+      function handleNavigation() {
+        const item = currentNavigationCursor.value;
+        // console.log('Navigation:', item.time, item);
+        navigationItems.push(item);
+        const temp = currentNavigationCursor;
+        currentNavigationCursor = undefined;
+        temp.continue();
+      }
 
-    function processInOrder() {
-      if (currentHistoryCursor && currentNavigationCursor) {
-        if (currentNavigationCursor.value.time <= currentHistoryCursor.value.time) {
+      function handleHistory() {
+        const item = currentHistoryCursor.value;
+        // console.log('Interaction:', item.time, item);
+        historyItems.push(item);
+        const temp = currentHistoryCursor;
+        currentHistoryCursor = undefined;
+        temp.continue();
+      }
+
+      function processInOrder() {
+        if (currentHistoryCursor && currentNavigationCursor) {
+          if (currentNavigationCursor.value.time <= currentHistoryCursor.value.time) {
+            handleNavigation();
+          } else {
+            handleHistory();
+          }
+        }
+
+        if (currentHistoryCursor === null && currentNavigationCursor) {
           handleNavigation();
-        } else {
+        }
+
+        if (currentNavigationCursor === null && currentHistoryCursor) {
           handleHistory();
         }
       }
 
-      if (currentHistoryCursor === null && currentNavigationCursor) {
-        handleNavigation();
+      return {
+        processHistoryItem(cursor) {
+          currentHistoryCursor = cursor;
+          processInOrder();
+        },
+        processNavigationItem(cursor) {
+          currentNavigationCursor = cursor;
+          processInOrder();
+        },
       }
+    })();
 
-      if (currentNavigationCursor === null && currentHistoryCursor) {
-        handleHistory();
+    const parseHistoryPromise = new Promise((resolve, reject) => {
+      historyStore.openCursor().onsuccess = function(e) {
+        const cursor = e.target.result;
+        if (cursor) {
+          processHistoryItem(cursor);
+        } else {
+          processHistoryItem(null);
+          console.log('Finished parsing history items');
+          resolve();
+        }
+      };
+    });
+
+    const parseNavigationPromise = new Promise((resolve, reject) => {
+      navigationStore.openCursor().onsuccess = function(e) {
+        const cursor = e.target.result;
+        if (cursor) {
+          processNavigationItem(cursor);
+        } else {
+          processNavigationItem(null);
+          console.log('Finished parsing navigation items');
+          resolve();
+        }
       }
-    }
+    });
 
-    return {
-      processHistoryItem(cursor) {
-        currentHistoryCursor = cursor;
-        processInOrder();
-      },
-      processNavigationItem(cursor) {
-        currentNavigationCursor = cursor;
-        processInOrder();
-      },
-    }
-  })();
-
-  historyStore.openCursor().onsuccess = function(e) {
-    const cursor = e.target.result;
-    if (cursor) {
-      processHistoryItem(cursor);
-    } else {
-      processHistoryItem(null);
-      console.log('Finished parsing history items');
-    }
-  };
-
-  navigationStore.openCursor().onsuccess = function(e) {
-    const cursor = e.target.result;
-    if (cursor) {
-      processNavigationItem(cursor);
-    } else {
-      processNavigationItem(null);
-      console.log('Finished parsing navigation items');
-    }
+    Promise.all([parseHistoryPromise, parseNavigationPromise]).then(() => {
+      const data = {
+        navigationItems,
+        historyItems,
+      };
+      const a = document.createElement('a');
+      const file = new Blob([JSON.stringify(data)], {type: 'text/plain'});
+      a.href = URL.createObjectURL(file);
+      a.download = 'browsingData.json';
+      a.click();
+    });
   }
 });
