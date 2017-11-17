@@ -1,0 +1,28 @@
+.form-control:focus {
+    box-shadow: none;
+}
+
+.suggestion {
+    padding: 0;
+}
+
+.suggestion a {
+    padding: .75rem 1.25rem;
+    display: block;
+    color: inherit;
+}
+
+.suggestion a:link {
+    color: inherit;
+    text-decoration: inherit;
+}
+
+.suggestion a:hover {
+    background-color: #eee;
+}
+
+.suggestion a:focus {
+    background-color: #80bdff;
+    color: white;
+    outline: none;
+}
