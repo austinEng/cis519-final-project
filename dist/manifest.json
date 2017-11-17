@@ -1,0 +1,21 @@
+{
+  "manifest_version": 2,
+  "name": "519 Final Project",
+  "version": "0.0.1",
+  "description": "Predictive browser navigation suggestions",
+  "content_security_policy": "script-src 'self'; object-src 'self'",
+  "permissions": [
+    "history",
+    "webNavigation",
+    "tabs"
+  ],
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+  "background": {
+    "scripts": [
+      "background.js"
+    ],
+    "persistent": true
+  }
+}
