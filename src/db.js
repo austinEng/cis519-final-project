@@ -11,9 +11,9 @@ export function initializeDB() {
       const db = e.target.result;
       const historyStore = db.createObjectStore('historyStore', { autoIncrement: true });
       const navigationStore = db.createObjectStore('navigationStore', { autoIncrement: true });
-
-      createObjectStores.push(new Promise(historyStore.transaction.oncomplete, historyStore.transaction.onerror));
-      createObjectStores.push(new Promise(navigationStore.transaction.oncomplete, navigationStore.transaction.onerror));
+      function nothing() { }
+      createObjectStores.push(new Promise(historyStore.transaction.oncomplete || nothing, historyStore.transaction.onerror || nothing));
+      createObjectStores.push(new Promise(navigationStore.transaction.oncomplete || nothing, navigationStore.transaction.onerror || nothing));
     };
     openDB.onsuccess = e => Promise.all(createObjectStores).then(() => resolve(e.target.result));
   });
