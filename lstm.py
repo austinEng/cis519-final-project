@@ -7,8 +7,13 @@ import time
 import random
 import collections
 import numpy as np
-import tensorflow as tf
-from tensorflow.contrib import rnn
+import operator
+import requests
+from base64 import urlsafe_b64encode
+# import tensorflow as tf
+import tldextract
+
+# from tensorflow.contrib import rnn
 
 n_input = 50
 n_hidden = 512
@@ -24,24 +29,84 @@ def elapsed(sec):
   else:
     return str(sec/(60*60)) + " hr"
 
+def readDictsFromFile():
+  with open('browsingData.json') as json_data:
+    data = json.load(json)
 def loadData():
+  key1 = '1xwUvmT4FPOyMReCUpmp'
+  secret_key1 = '2ScKxRLSsy3FUX7GjAmh'
+  key2 = 'tBIwxRy01HI6oLEjX03P'
+  secret_key2 = '3l1UNkJsGIsqHe9j7MMi'
+  key3 = 'TdVNTGXfnh8SL7C3yapI'
+  secret_key3 = 'FYAjxschiCRZay6e4RF6'
+  key4 = 'GDtuQ8ProJfzUGPv5nnR'
+  secret_key4 = 'xnAyBDP35QQqh4kpcaGU'
+
   print("Loading data...")
   with open ('browsingData.json') as json_data:
     data = json.load(json_data)
 
   navigationData = data['navigationItems']
   historyData = [x for x in data['historyItems'] if 'id' in x]
-
+  
   print("Processing data...")
   dictionary = dict()
-  idx = 0
-  for historyItem in historyData:
-    if historyItem['id'] not in dictionary:
-      dictionary[historyItem['id']] = idx
-      idx += 1
+  url_to_categories = dict()
+  categories_dict = dict()
+  idx = 1
+  count = 0
 
+  with open('category_data.json', 'a') as file:
+    for historyItem in historyData:
+      curr_url = historyItem['url']
+      if "http" in curr_url[:5]:
+        extracted_url = tldextract.extract(curr_url)
+        shortened_url = ".".join(s.strip() for s in extracted_url if s.strip())
+
+        if shortened_url not in url_to_categories:
+          api_url = "https://api.webshrinker.com/categories/v3/{}".format(shortened_url)
+          if count < 100:
+            response = requests.get(api_url, auth=(key1, secret_key1))
+          elif count < 200:
+            response = requests.get(api_url, auth=(key2, secret_key2))
+          elif count < 300:
+            response = requests.get(api_url, auth=(key3, secret_key3))
+          else:
+            response = requests.get(api_url, auth=(key4, secret_key4))
+          # try:
+          status_code = response.status_code
+          count += 1
+          if status_code == 200:
+            print (curr_url)
+            try:
+              data = response.json()
+              # print ()
+              # Do something with the JSON response
+              category_data = data['data'][0]['categories']
+              category_data.sort(key=operator.itemgetter('score'), reverse=True)
+              file.write(json.dumps(category_data))
+              categories_dict[category_data[0]['label']] = idx
+              idx += 1
+              url_to_categories[shortened_url] = category_data[0]['label']
+            except:
+              url_to_categories[shortened_url] = 'bad_url'
+              categories_dict['bad_url'] = 0
+          else:
+            print (curr_url)
+            print (status_code)
+            url_to_categories[shortened_url] = 'bad_url'
+            categories_dict['bad_url'] = 0
+        if historyItem['url'] not in dictionary:
+          dictionary[historyItem['url']] = categories_dict[url_to_categories[shortened_url]]
+
+  with open('categories_dict.txt', 'w') as file:
+    file.write(json.dumps(categories_dict))
+  with open('url_to_categories.txt', 'w') as file:
+    file.write(json.dumps(url_to_categories))
+  with open('labels.txt', 'w') as file:
+    file.write(json.dumps(dictionary))
   reverse_dictionary = dict(zip(dictionary.values(), dictionary.keys()))
-  label_count = len(dictionary)
+  label_count = len(categories_dict)
 
   for v in dictionary.values():
     if v >= label_count:
@@ -158,4 +223,5 @@ def main():
 
 
 if __name__ == "__main__":
-  main()
+  loadData()
+  # main()
