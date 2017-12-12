@@ -2,19 +2,40 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+
 import json
 import time
 import random
 import collections
+import csv
+import datetime
+
+from numpy import newaxis
+import sklearn.metrics
+from matplotlib import pyplot
+
+
 import numpy as np
+import pandas as pd
+from subprocess import check_output
+from keras.layers.core import Dense, Activation, Dropout
+from keras.layers.recurrent import LSTM
+from keras.models import  Sequential
+from sklearn.cross_validation import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+import matplotlib.pyplot as plt
+from numpy import newaxis
+
+from sklearn.metrics import mean_squared_error
 import tensorflow as tf
 from tensorflow.contrib import rnn
-
+import tldextract
+look_back = 1
 n_input = 50
 n_hidden = 512
 learning_rate = 0.001
 training_iters = 50000
-display_step = 10
+display_step = 100
 
 def elapsed(sec):
   if sec<60:
@@ -24,18 +45,90 @@ def elapsed(sec):
   else:
     return str(sec/(60*60)) + " hr"
 
+
+
+
+def will_load_data(myfile = "converted_data.csv",interval_since_last_visited = 3600):
+  print("Loading data...")
+  set_of_domain_and_last_visited = {}
+  # with open('convertedData', 'wb') as myfile:
+  #   wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+  matrix = []
+  map_of_domain_to_category = {}
+  index = 0
+  with open('browsingData.json') as json_data:
+    data = json.load(json_data)
+    historyData = [x for x in data['historyItems'] if 'id' in x]
+    for historyItem in historyData:
+      curr_url = historyItem['url']
+      extracted_url = tldextract.extract(curr_url).domain
+      if extracted_url not in map_of_domain_to_category:
+        map_of_domain_to_category[extracted_url] = index
+        index = index + 1
+
+
+  with open('browsingData.json') as json_data:
+    data = json.load(json_data)
+    historyData = [x for x in data['historyItems'] if 'id' in x]
+    for historyItem in historyData:
+      current_input = []
+      curr_url = historyItem['url']
+      extracted_url = tldextract.extract(curr_url).domain
+      time = historyItem['time']
+      seconds = time / 1000.0
+
+      d = datetime.datetime.fromtimestamp(seconds)
+      hour_of_the_day = int(d.hour + d.minute / 60. + d.second / 3600)
+
+      recently_visited = 0 if ((not extracted_url in set_of_domain_and_last_visited) or (seconds - set_of_domain_and_last_visited[extracted_url] > interval_since_last_visited)) else 1
+      set_of_domain_and_last_visited[extracted_url] = seconds
+      current_input.append(map_of_domain_to_category[extracted_url])
+      current_input.append(hour_of_the_day)
+      current_input.append(recently_visited)
+      matrix.append(current_input)
+
+  matrix = np.matrix(matrix)
+
+  matrix = (matrix - np.mean(matrix, axis=1)) / np.std(matrix, axis=1)
+
+
+  train_size = int(len(matrix) * 0.80)
+  test_size = len(matrix) - train_size
+
+
+  train = matrix[0:train_size]
+  test = matrix[train_size:]
+  print(train)
+
+  return train, test
+
+
+
+
+
+
+
 def loadData():
   print("Loading data...")
   with open ('browsingData.json') as json_data:
     data = json.load(json_data)
-
+  set = {}
   navigationData = data['navigationItems']
   historyData = [x for x in data['historyItems'] if 'id' in x]
+
 
   print("Processing data...")
   dictionary = dict()
   idx = 0
   for historyItem in historyData:
+    curr_url = historyItem['url']
+    extracted_url = tldextract.extract(curr_url).domain
+    if not extracted_url in set:
+      set[extracted_url] = 1
+
+    extracted_url = tldextract.extract(curr_url)
+    print(historyItem)
+
     if historyItem['id'] not in dictionary:
       dictionary[historyItem['id']] = idx
       idx += 1
@@ -43,6 +136,10 @@ def loadData():
   reverse_dictionary = dict(zip(dictionary.values(), dictionary.keys()))
   label_count = len(dictionary)
 
+  print("the sizew of set")
+  print(len(set))
+  for key, value in set.iteritems():
+    print(key)
   for v in dictionary.values():
     if v >= label_count:
       raise ValueError
@@ -51,6 +148,8 @@ def loadData():
 
 def RNN(x, weights, biases):
   x = tf.reshape(x, [-1, n_input])
+
+
   x = tf.split(x, n_input, 1)
 
   rnn_cell = rnn.MultiRNNCell([
@@ -64,97 +163,82 @@ def RNN(x, weights, biases):
 
   return tf.matmul(outputs[-1], weights['out']) + biases['out']
 
+
+def predict_sequences_multiple(model, firstValue, length):
+  prediction_seqs = []
+  curr_frame = firstValue
+
+  for i in range(length):
+    predicted = []
+
+    print(model.predict(curr_frame[newaxis, :, :]))
+    predicted.append(model.predict(curr_frame[newaxis, :, :])[0, 0])
+
+    curr_frame = curr_frame[0:]
+    curr_frame = np.insert(curr_frame[0:], i + 1, predicted[-1], axis=0)
+
+    prediction_seqs.append(predicted[-1])
+
+  return prediction_seqs
+
+def create_dataset(dataset, look_back=1):
+  dataX = []
+  dataY = []
+
+  for i in range(len(dataset)-look_back-1):
+      a = dataset[i:(i+look_back)]
+      if i == 2:
+        print("LOOOl")
+        print(a)
+        print(dataset[i + look_back, 0])
+      dataX.append(a)
+      dataY.append(dataset[i + look_back, 0])
+  return np.array(dataX), np.array(dataY)
+
 def main():
   start_time = time.time()
+  train_data, test_data =  will_load_data()
+  trainX, trainY = create_dataset(train_data, look_back)
+  testX, testY = create_dataset(test_data, look_back)
 
-  historyData, dictionary, reverse_dictionary, label_count = loadData()
+  # trainX = np.reshape(trainX, (trainX.shape[0], 1, trainX.shape[1]))
+  # testX = np.reshape(testX, (testX.shape[0], 1, testX.shape[1]))
 
-  x = tf.placeholder("float", [None, n_input, 1])
-  y = tf.placeholder("float", [None, label_count])
+  # Step 2 Build Model
 
-  weights = {
-    'out': tf.Variable(tf.random_normal([n_hidden, label_count]))
-  }
 
-  biases = {
-    'out': tf.Variable(tf.random_normal([label_count]))
-  }
+  model = Sequential()
+  model.add(LSTM(20, input_shape=(trainX.shape[1], trainX.shape[2])))
+  model.add(Dense(1))
+  model.compile(loss='mse', optimizer='rmsprop')
+  history = model.fit(trainX, trainY, epochs=500, batch_size=20, validation_data=(testX, testY), verbose=2,
+                      shuffle=False)
+  pyplot.plot(history.history['loss'], label='train')
+  pyplot.plot(history.history['val_loss'], label='test')
+  pyplot.legend()
+  pyplot.show()
 
-  pred = RNN(x, weights, biases)
+  # make a prediction
+  yhat = model.predict(testX)
+  test_X = testX.reshape((testX.shape[0], testX.shape[2]))
+  # invert scaling for forecast
+  inv_yhat = np.concatenate((yhat, test_X[:, 1:]), axis=1)
 
-  # Loss and optimizer
-  cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=pred[0], labels=y))
-  optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(cost)
+  scaler = MinMaxScaler(feature_range=(0, 1))
 
-  # Model evaluation
-  correct_pred = tf.equal(tf.argmax(pred,1), tf.argmax(y,1))
-  accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
 
-  # Initializing the variables
-  init = tf.global_variables_initializer()
+  inv_yhat = scaler.inverse_transform(inv_yhat)
+  inv_yhat = inv_yhat[:, 0]
+  # invert scaling for actual
+  test_y = testY.reshape((len(testY), 1))
+  inv_y = np.concatenate((test_y, test_X[:, 1:]), axis=1)
+  inv_y = scaler.inverse_transform(inv_y)
+  inv_y = inv_y[:, 0]
+  # calculate RMSE
+  rmse = np.sqrt(mean_squared_error(inv_y, inv_yhat))
+  print('Test RMSE: %.3f' % rmse)
 
-  logs_path = '/tmp/tensorflow/rnn_browsing'
-  writer = tf.summary.FileWriter(logs_path)
 
-  # Launch the graph
-  with tf.Session() as session:
-    session.run(init)
-    step = 0
-    offset = random.randint(0,n_input+1)
-    end_offset = n_input + 1
-    acc_total = 0
-    loss_total = 0
-
-    writer.add_graph(session.graph)
-
-    print("Training model...")
-    while step < training_iters:
-      if offset > len(historyData) - end_offset:
-        offset = random.randint(0, n_input+1)
-
-      inputs = [
-        [
-          # title
-          # url
-          dictionary[historyData[i]['id']],
-          historyData[i]['typedCount'],
-          historyData[i]['lastVisitTime'],
-          historyData[i]['visitCount'],
-          historyData[i]['time'],
-        ] for i in range(offset, offset + n_input)
-      ]
-      # inputs.append([ historyData[offset + n_input]['time'] ])
-      inputs = np.reshape(np.array(inputs), [-1, n_input, 1])
-
-      label = historyData[offset + n_input]['id']
-      onehot_out = np.zeros([label_count], dtype=float)
-      onehot_out[dictionary[label]] = 1.0
-      onehot_out = np.reshape(onehot_out,[1,-1])
-
-      _, acc, loss, onehot_pred = session.run([optimizer, accuracy, cost, pred], feed_dict={x: inputs, y: onehot_out})
-
-      # predicted_label = reverse_dictionary[int(tf.argmax(onehot_pred, 1).eval()[0])]
-      # print('Predicted:', predicted_label, 'Actual:', label)
-
-      loss_total += loss
-      acc_total += acc
-
-      if (step+1) % display_step == 0:
-        print("Iter= " + str(step+1) + ", Average Loss= " + \
-              "{:.6f}".format(loss_total/display_step) + ", Average Accuracy= " + \
-              "{:.2f}%".format(100*acc_total/display_step))
-        acc_total = 0
-        loss_total = 0
-        # symbols_in = [historyData[i] for i in range(offset, offset + n_input)]
-        # symbols_out = historyData[offset + n_input]
-        # symbols_out_pred = reverse_dictionary[int(tf.argmax(onehot_pred, 1).eval())]
-        # print("%s - [%s] vs [%s]" % (symbols_in,symbols_out,symbols_out_pred))
-
-      step += 1
-      offset += (n_input+1)
-
-    print("Optimization Finished!")
-    print("Elapsed time: ", elapsed(time.time() - start_time))
 
 
 if __name__ == "__main__":
